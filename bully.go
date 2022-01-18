@@ -81,6 +81,7 @@ func (self *Bully) MyAddr() string {
 
 func (self *Bully) AddCandidate(addrStr string, id *big.Int, timeout time.Duration) error {
 	addr, err := net.ResolveTCPAddr("tcp", addrStr)
+	Print(fmt.Sprintf("resolved addr:%s", addr.String()))
 	if err != nil {
 		return err
 	}
@@ -90,6 +91,7 @@ func (self *Bully) AddCandidate(addrStr string, id *big.Int, timeout time.Durati
 	if timeout <= 1*time.Second {
 		timeout = 2 * time.Second
 	}
+	Print(fmt.Sprintf("create ctr"))
 	ctrl := new(control)
 	ctrl.addr = addrStr
 	ctrl.id = id
@@ -98,7 +100,9 @@ func (self *Bully) AddCandidate(addrStr string, id *big.Int, timeout time.Durati
 	replyChan := make(chan *controlReply)
 	ctrl.replyChan = replyChan
 
+	Print(fmt.Sprintf("send ctrl to self"))
 	self.ctrlChan <- ctrl
+	Print(fmt.Sprintf("waiting for reply"))
 	reply := <-replyChan
 	if reply == nil {
 		return ErrUnknownError
