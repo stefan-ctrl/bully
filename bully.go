@@ -21,12 +21,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/nu7hatch/gouuid"
 	"math/big"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	uuid "github.com/nu7hatch/gouuid"
 )
 
 func stringToBig(str string) *big.Int {
@@ -43,13 +44,21 @@ type LeaderObserver interface {
 }
 
 type Bully struct {
-	myId     *big.Int
-	cmdChan  chan *command
-	ctrlChan chan *control
-	ln       net.Listener
-	myAddr   net.Addr
-	myCAAddr string
-	observer LeaderObserver
+	myId             *big.Int
+	oldLeader        *big.Int
+	cmdChan          chan *command
+	ctrlChan         chan *control
+	ln               net.Listener
+	myAddr           net.Addr
+	myCAAddr         string
+	observer         LeaderObserver
+	Unstable         chan struct{}
+	FirstElection    bool
+	HasLeader        bool
+	NewLeader        bool
+	IsLeader         bool
+	T2Started        bool
+	ElectionFinished bool
 }
 
 type Candidate struct {
@@ -206,6 +215,14 @@ func NewBully(ln net.Listener, myId *big.Int, obv LeaderObserver) *Bully {
 	ret.ctrlChan = make(chan *control)
 	ret.ln = ln
 	ret.observer = obv
+	ret.Unstable = make(chan struct{})
+	ret.FirstElection = true
+	ret.HasLeader = false
+	ret.NewLeader = false
+	ret.IsLeader = false
+	ret.T2Started = false
+	ret.oldLeader = big.NewInt(-1)
+	ret.ElectionFinished = false
 	go ret.listen(ln)
 	go ret.process()
 	return ret
@@ -439,6 +456,11 @@ func (self *Bully) electUntilDie(candy []*node, timeout time.Duration) ([]*node,
 	for leader == nil || err != nil {
 		leader, candy, err = self.elect(candy, timeout)
 	}
+	PrintTiming(LEADER_ELECTED)
+	self.IsLeader = leader.id.Int64() == self.myId.Int64()
+	self.HasLeader = true
+	self.NewLeader = leader.id.IsInt64() == self.oldLeader.IsInt64()
+	self.oldLeader.Set(leader.id)
 	if self.observer != nil {
 		if leader.id.Cmp(self.myId) == 0 {
 			self.observer.OnBeingElected()
@@ -450,6 +472,7 @@ func (self *Bully) electUntilDie(candy []*node, timeout time.Duration) ([]*node,
 var ErrNeedNewElection = errors.New("Need another round")
 
 func (self *Bully) elect(candy []*node, timeout time.Duration) (leader *node, newCandy []*node, err error) {
+	PrintTiming(ELECTION_START)
 	higherCandy := make([]*node, 0, len(candy))
 	//	fmt.Printf("[ELECT TMP] my (%v) candy list %v\n", self.myId, candyToString(candy))
 	newCandy = candy
@@ -465,6 +488,10 @@ func (self *Bully) elect(candy []*node, timeout time.Duration) (leader *node, ne
 		}
 	}
 
+	if !self.FirstElection {
+		self.Unstable <- struct{}{}
+	}
+	self.FirstElection = false
 	// No one is higher than me.
 	// I am the leader.
 	if len(higherCandy) <= 0 {
@@ -472,12 +499,14 @@ func (self *Bully) elect(candy []*node, timeout time.Duration) (leader *node, ne
 		leader = new(node)
 		leader.conn = nil
 		leader.id = self.myId
+		self.IsLeader = true
 		leader.caAddr = self.myCAAddr
 		for _, c := range candy {
 			cmd := new(command)
 			cmd.Cmd = cmdCOORDIN
 			writeCommand(c.conn, cmd)
 		}
+		self.ElectionFinished = true
 		return
 	}
 	slaved := false
@@ -490,6 +519,7 @@ func (self *Bully) elect(candy []*node, timeout time.Duration) (leader *node, ne
 				candy = removeNode(candy, cmd.src)
 				newCandy = candy
 				err = ErrNeedNewElection
+				self.Unstable <- struct{}{}
 				return
 			case cmdHELLO:
 				reply := new(command)
@@ -511,13 +541,16 @@ func (self *Bully) elect(candy []*node, timeout time.Duration) (leader *node, ne
 				//				fmt.Printf("[ELECT RESULT] %v is the leader\n", cmd.src)
 				if n == nil {
 					err = ErrNeedNewElection
+					self.Unstable <- struct{}{}
 					return
 				}
 				if n.id.Cmp(self.myId) < 0 {
 					err = ErrNeedNewElection
+					self.Unstable <- struct{}{}
 					return
 				}
 				leader = n
+				self.ElectionFinished = true
 				return
 			}
 		case <-time.After(timeout):
