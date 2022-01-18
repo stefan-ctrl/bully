@@ -15,11 +15,12 @@
  *
  */
 
-package main
+package bully
 
 import (
 	"net"
 	"testing"
+
 	//"runtime"
 	"fmt"
 	"time"

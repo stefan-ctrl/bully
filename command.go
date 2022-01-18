@@ -15,15 +15,16 @@
  *
  */
 
-package main
+package bully
 
 import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"labix.org/v2/mgo/bson"
 	"math/big"
 	"net"
+
+	"labix.org/v2/mgo/bson"
 )
 
 const (

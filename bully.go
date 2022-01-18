@@ -15,7 +15,7 @@
  *
  */
 
-package main
+package bully
 
 import (
 	"crypto/sha256"
