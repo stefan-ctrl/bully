@@ -459,7 +459,7 @@ func (self *Bully) electUntilDie(candy []*node, timeout time.Duration) ([]*node,
 	PrintTiming(LEADER_ELECTED)
 	self.IsLeader = leader.id.Int64() == self.myId.Int64()
 	self.HasLeader = true
-	self.NewLeader = leader.id.IsInt64() == self.oldLeader.IsInt64()
+	self.NewLeader = leader.id.Int64() == self.oldLeader.Int64()
 	self.oldLeader.Set(leader.id)
 	if self.observer != nil {
 		if leader.id.Cmp(self.myId) == 0 {
